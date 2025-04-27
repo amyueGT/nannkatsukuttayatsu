@@ -17,13 +17,6 @@ function 3ex(){
 	fi
 }
 
-function AAAis_str(){
-	#local arg=$1
-	local result=1;
-	expr $1 + 1 2>>/dev/null
-	if (( $? == 2 ));then result=0;fi
-	return $result
-}
 
 function is_str(){
 	#local arg=$1
@@ -36,105 +29,183 @@ function is_str(){
 
 
 log_sep='=========='
-log_format_text='%s${additional_format}'
-log_format_exec="%sfuncName::line:%s:%s\n%s"
-#log_format_command="%s::line:%s::%s\=%s\${additional_format}\\n%s"
-log_format_command_start="${log_sep} command log::%s@%s\(line@%s\)::varName:%s\${additional_format}::start ${log_sep}\\\n\\\n%s"
-log_format_command_end="${log_sep} command log::%s@%s\(line@%s\)::varName:%s\${additional_format}::end ${log_sep}\\\n\\\n"
-log_format_result_start="${log_sep} list log::%s@%s\(line@%s\)::varName:%s\(size:%s\)\${additional_format}::start ${log_sep}\\\n\\\n"
-log_format_result_end="${log_sep} list log::%s@%s\(line@%s\):%s::varName:%s\(size:%s\)::end ${log_sep}\\\n\\\n"
+format_text='[${mode_letter}]%s${additional_format}'
+format_text_append='%s${additional_format}'
+invoke_stat="\${BASH_SOURCE[1]##*/}@line:\${BASH_LINENO[0]}\(\#\${FUNCNAME[1]}\)"
+format_command_start="[\${mode_letter}]${log_sep} ${invoke_stat}::varName:%s\${additional_format}:: command log start ${log_sep}\\\n\\\n%s\\\n\\\n"
+format_command_end="[\${mode_letter}]${log_sep} ${invoke_stat}::varName:%s\${additional_format}:: command log end ${log_sep}\\\n\\\n"
+format_result_start="[\${mode_letter}]${log_sep} ${invoke_stat}::varName:%s\(size:%s\)\${additional_format}:: result log start ${log_sep}\\\n\\\n"
+format_result_end="\\\n[\${mode_letter}]${log_sep} ${invoke_stat}::varName:%s\(size:%s\):: result log end ${log_sep}\\\n\\\n"
+
+mode_letter_info="INFO"
+mode_letter_debug="DEBUG"
+mode_letter_trace="TRACE"
+mode_letter_warn="WARN"
+mode_letter_error="ERROR"
+mode_letter_logger_warn="LOGGER-WARN"
+mode_letter_logger_error="LOGGER-ERROR"
+
 
 logm_info=0
 logm_info_dnl=1
-logm_exec_command=11
-logm_exec_result=12
+logm_info_append=2
+logm_info_append_dnl=3
+logm_exec_result=4
+logm_exec_command=5
+
+log_mode_debug=50
+log_mode_trace=60
+log_mode_warn=80
+log_mode_error=90
+
+log_mode_info=0 #<100
+log_mode_debug=100
+log_mode_trace=200
+
+
+target_log_mode=$shell_log_mode
 
 function logger(){
-	# $1=$log_mode 出力するフォーマットの切り替え用 
-
+	# $1=$log_mode 出力するフォーマットの切り替え用
 	local log_mode=$1
+	log_mode=${log_mode:="info"}
+	local is_str_log_mode=$(is_str ${log_mode}) 
 	local text="$2"
 
 	local additional_format=
 
-	local flag=false;
-	if $(is_str ${log_mode}) && [[ ${log_mode} =~ (text|txt|t|info|inf|i) ]];then flag=true;fi
-	if ! $flag && (( ${log_mode} < $logm_exec_command ));then flag=true;fi
+	local mode_letter=$mode_letter_info
+	flag=false
+	if ${is_str_log_mode} && [[ ${log_mode} =~ (deb|debug) ]];then flag=true;fi
+	if ! $flag && ! ${is_str_log_mode} && (( ${log_mode} >= $log_mode_debug && ${log_mode} < $log_mode_trace ));then flag=true;fi
 	if $flag;then
-	#if (( $mode < $mode_debug ));then
-		# $log_mode print_text 
+		if (( $target_log_mode < $log_mode_debug ));then return 0;fi
+		mode_letter=$mode_letter_debug
+	fi
+	flag=false
+	if ${is_str_log_mode} && [[ ${log_mode} =~ (trc|trace) ]];then flag=true;fi
+	if ! $flag && ! ${is_str_log_mode} && (( ${log_mode} >= $log_mode_trace && ${log_mode} < $log_mode_warn ));then flag=true;fi
+	if $flag;then
+		if (( $target_log_mode < $log_mode_trace ));then return 0;fi
+		mode_letter=$mode_letter_trace
+	fi
+	local flag=false;
+	if ! ${is_str_log_mode}&&$(3ex $( (( $log_mode%100 >= $log_mode_warn ));echo $?)$qq"true"$qor"false");then flag=true;fi
+	if $flag || [[ ${log_mode} =~ (warn|wrn|wan) ]];then
+		mode_letter=$mode_letter_warn
+	fi
+	flag=false
+	if ! $is_str_log_mode&&$(3ex $( (( $log_mode%100 >= $log_mode_error ));echo $?)$qq"true"$qor"false");then flag=true;fi
+	if $flag || [[ ${log_mode} =~ (error|err|errr) ]];then
+		mode_letter=$mode_letter_error
+	fi
+
+	local flag=false;
+	#if $(3ex $(is_str ${log_mode};echo $?)$qq"true"$qor"false") && [[ ${log_mode} =~ (text|txt) ]];then flag=true;fi
+	if ${is_str_log_mode} && [[ ${log_mode} =~ (text|txt|info|inf) ]];then flag=true;fi
+	if ! $flag && ! ${is_str_log_mode} && (( ${log_mode}%10 <= $logm_info_dnl ));then flag=true;fi
+	if $flag;then
+		#echo =====info log 
 		# 通常のログ 件数とかフリーなテキスト ダブルクォートで囲って一行で
 		# $1=text
 		# fromat $text
-		if $(is_str ${log_mode}) && [[ ! ${log_mode} =~ (disable_new_line|_disablenewline|disable|_dnl|d) ]];then flag=true;fi
-		if ! $flag && (( ${log_mode} != ${logm_info_dnl} ));then flag=true;fi
+		flag=false;
+		if ${is_str_log_mode} && [[ ${log_mode} =~ (result|res|r) ]];then flag=true;fi
+		if ! $flag  &&  ! ${is_str_log_mode} && (( ${log_mode} == $logm_exec_result ));then flag=true;fi
+		if $flag;then
+			print_result "$@" #$1=$log_mode $2=$text $3=var_name $4=value $5=size
+			return
+		fi 
+
+
+		local format=$format_text
+		flag=false
+		if ${is_str_log_mode} && [[ ${log_mode} =~ (appe|apen|apnd|appnd|apd|appen|append) ]];then flag=true; fi
+		if ! $flag &&  ! ${is_str_log_mode} && (( ${log_mode} != ${logm_info_append} ));then flag=true;fi
+		if $flag;then
+			format=$format_text_append
+		fi
+		flag=false
+		if ${is_str_log_mode} && [[ ! ${log_mode} =~ (dnl|disable_new_line|_disablenewline|disable) ]];then flag=true;fi
+		if ! $flag &&  ! ${is_str_log_mode} && (( ${log_mode} != ${logm_info_dnl} ));then flag=true;fi
 		if $flag;then
 			additional_format='\n'
 		fi
-		printf "$(eval echo "${log_format_text}")" "${text}"
+		printf "$(eval echo "${format}")" "${text}"
+		return
 	fi
+	if(( $target_log_mode < $log_mode_debug ));then
+		return; 
+	else
+		#print result
+		mode_letter=$mode_letter_debug
+		flag=false;
+		if ${is_str_log_mode} && [[ ${log_mode} =~ (result|res|r) ]];then flag=true;fi
+		if ! $flag  &&  ! ${is_str_log_mode} && (( ${log_mode} == $logm_exec_result ));then flag=true;fi
+		if $flag;then
+			local inv=$(echo $(eval echo $invoke_stat))
+			if [[ -z $3 ]];then printf "[${mode_letter_logger_error}]%s\n" "${inv} result-log \$3=var_name is blank. logger canceled"; return 1; fi
+			if [[ -z $4 ]];then printf "[${mode_letter_logger_error}]%s\n" "${inv} result-log \$4=value is blank. logger canceled"; return 1; fi
 
-	flag=false;
-	if $(is_str ${log_mode}) && [[ ${log_mode} =~ (command|com|c) ]];then flag=true;fi
-	if ! $flag && (( ${log_mode} == $logm_exec_command ));then flag=true;fi
-	if $flag;then
-		# $1=$log_mode $2=$text $3=file_name $3=func_name $4=line $5=var_name $6=exec_com
-		# シェル上で作ったコマンド
-		# format:funcName::line:行数::変数名=value::必要ならメッセージ\nコマンド
-		local file_name="$3"
-		local func_name="$4"
-		local line=$5
-		local var_name="$6"
-		local exec_com="$7"
-		if [[ ! -z $text ]];then
-			#additional_format='::%s'
-			additional_format="::${text}"
-		fi
-
-		printf "$(eval echo "${log_format_command_start}")" "${file_name}" "${func_name}" "${line}" "${var_name}" "${exec_com}"
-		printf "$(eval echo "${log_format_command_end}")" "${file_name}"  "${func_name}" "${line}" "${var_name}" 
-	fi
-
-
-	flag=false;
-	if $(is_str ${log_mode}) && [[ ${log_mode} =~ (result|res|r) ]];then flag=true;fi
-	if ! $flag && (( ${log_mode} == $logm_exec_result ));then flag=true;fi
-	if (( $log_mode == $logm_exec_result ));then
-			# $1=$log_mode $2=$text $3=file_name $4=func_name $5=line $6=var_name $7=size $8=value
+			#echo ====result log
+			# $1=$log_mode $2=$text $3=var_name $4=value $5=size
+			# $4 value は配列ならクォーテーションありで${arr[*]}アットでなくアスタ、テキストならクォーテーションをつけないで引数を渡す事でレコードまたは配列の要素が正常に区切られる
+			# $5 size は表示したい件数。マイナス指定で後ろから 
 			# 行数が大きくなるコマンド実行結果の変数の値
-			# format:
-			# ========= funcName::line:行数::varName:変数名(size:件数)::必要ならメッセージ::start =========\n
-			# 変数内容\n
-			# ========= funcName::line:行数::varName:変数名(size:件数)::end =========\n
-			local file_name="$3"
-			local func_name="$4"
-			local line=$5
-			local var_name="$6"
-			local size=$7
-			eval "local $var_name=\"$8\""
-			if [[ $(declare -p $var_name) =~ -a ]];then
-				var_name+="[@]"
-			fi
+			# フォーマットは format_result_start/format_result_end
+
+			local var_name="$3"
+			local size=$5
+			size=${size:=0}
+
+			eval local ${var_name}=\"$4\"
+			eval ${var_name}=\(\"${!var_name// /\" \"}\"\)
+			local list_size=$(eval "echo \"\${#$var_name[@]}\"")
+			if (( size == 0 ));then size=$list_size; fi
+
 			if [[ ! -z $text ]];then
-				#additional_format='::%s'
+				additional_format="::${text}"
+			fi
+			local max=${size}
+			local key=0
+			if(( $size < 0 ));then max=${list_size}; key=$((list_size+size)); fi
+
+			printf "$(eval echo "${format_result_start}")"  "${var_name}" "${list_size}"
+			for (( ;key<$max;key++ ));do
+				printf "${var_name}[%s]:%s\n" $key "$(eval echo "\${$var_name[$key]}")"
+			done
+			printf "$(eval echo "${format_result_end}")" "${var_name}" "${list_size}"
+		fi
+	fi
+
+	if(( $target_log_mode < $log_mode_trace ));then
+		return; 
+	else
+		#print command
+		mode_letter=$mode_letter_trace
+		flag=false;
+		if ${is_str_log_mode} && [[ ${log_mode} =~ (command|com|c) ]];then flag=true;fi
+		if ! $flag &&  ! ${is_str_log_mode} && (( ${log_mode} == $logm_exec_command ));then flag=true;fi
+		if $flag;then
+			#echo ====command log
+			# $1=$log_mode $2=$text $3=var_name $4=exec_com
+			# シェル上で作ったコマンド
+			local var_name="$3"
+			var_name="${var_name:= #blank# }"
+			local exec_com="$4"
+			if [[ ! -z $text ]];then
 				additional_format="::${text}"
 			fi
 
-			printf "$(eval echo "${log_format_result_start}")" "${file_name}" "${func_name}" "${line}" "${var_name}" "${size}"
-			echo -e "${!var_name}"
-			printf "${log_format_result_end}" "${file_name}" "${func_name}" "${line}" "${var_name}" "${size}"
-		fi
-		
-		# $log_mode warn_mes
-		# 設定してない項目とか
+			printf "$(eval echo "${format_command_start}")" "${var_name}" "${exec_com}"
+			printf "$(eval echo "${format_command_end}")" "${var_name}" 
 
-		# $log_mode 
-		# format WARNING $
-		return 0;
+		fi
 	fi
 
-	# funcName line:No.
-	
+	# 設定してない項目とか
+
+	return 0;	
 }
 
 

@@ -1,0 +1,13 @@
+#!/bin/bash
+
+files=($(ls --color=never test_shell.d))
+for arg in $@;
+do
+	for file in $files;
+	do
+
+	if [[  $files =~ $arg ]];then
+		./test_shell.d/$files
+	fi
+	done
+done

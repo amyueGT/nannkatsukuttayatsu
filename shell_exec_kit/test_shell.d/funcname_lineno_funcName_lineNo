@@ -1,0 +1,38 @@
+#!/usr/bin/bash
+
+function print_lineNo(){
+	echo begin $FUNCNAME
+	echo \${BASH_LINENO[0]}= ${BASH_LINENO[0]};
+	echo \${BASH_LINENO[1]}= ${BASH_LINENO[1]};
+	echo \${BASH_LINENO[2]}=${BASH_LINENO[2]};
+	echo \${FUNCNAME[0]}= ${FUNCNAME[0]};
+	echo \${FUNCNAME[1]}= ${FUNCNAME[1]};
+	echo \${FUNCNAME[2]}= ${FUNCNAME[2]};
+
+	echo linNo by for loop
+	local index=${#BASH_LINENO}
+	echo elements count :$index
+	for ((x=$index;x>=0;x--));
+	do
+		local lineNo_index=$(($x-1));
+		echo -n \${FUNCNAME[${x}]}=${FUNCNAME[${x}]} : ;
+		echo \${BASH_LINENO[${lineNo_index}]}=${BASH_LINENO[${lineNo_index}]};
+	done
+	echo ${BASH_LINENO[-2]} #後ろから2つ目が参照される。要素数５ならindexは3
+	echo $FUNCNAME end
+}
+
+function test_ln(){
+	echo $FUNCNAME
+	echo $LINENO
+	echo ${BASH_LINENO[@]}
+  echo
+	print_lineNo
+}
+
+
+echo $LINENO
+echo ${BASH_LINENO[@]}
+test_ln
+echo
+cat -n ${BASH_SOURCE[0]}

@@ -1,13 +1,54 @@
 #!/bin/bash
 
 files=($(ls --color=never test_shell.d))
-for arg in $@;
-do
-	for file in $files;
-	do
-
-	if [[  $files =~ $arg ]];then
-		./test_shell.d/$files
+target_file=
+invoke_args=
+is_print_source=false
+for arg in "$@";do
+if [[ $arg =~ "arg=" ]];then
+	invoke_args=${arg#*=}
+	echo invoke_args="$invoke_args"
+else
+	if [[ $arg =~ (print_source|source) ]];then
+		is_print_source=true;
+	elif [[ -z $files ]];then
+		echo "テスト対象ファイルの指定は一個まで"
+		continue;
 	fi
+	for file in ${files[@]};do
+		TMP=$IFS
+		IFS=$'_'
+		file_name_words=($file)
+		IFS=$TMP
+		for name_word in ${file_name_words[@]};
+		do
+			if [[ $arg == $name_word ]];then
+				target_file="$file"
+				echo target_file=$target_file
+				unset files
+				break
+			fi
+		done
 	done
+fi
 done
+
+if [[ -z $target_file ]];then
+	echo　テスト対象ファイルの取得失敗
+	echo source help 等の指定はスペースをあけて
+	echo 例：./test_shell logger source arg="..."
+	return
+fi
+echo invoke $target_file "\"$invoke_args\""
+if $is_print_source;then
+	echo srource is
+	echo
+	cat ./test_shell.d/$target_file
+	echo
+	echo
+	echo ================= execute =====================
+	echo
+	echo
+fi
+
+./test_shell.d/$target_file "$invoke_args"

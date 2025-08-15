@@ -1,19 +1,39 @@
 #!/bin/bash
+echo ============================== $BASH_SOURCE is run. \$@= \" $@ \" =========================
 
-files=($(ls --color=never test_shell.d))
+
+dir="test_shell.d"
+files=($(ls --color=never $dir))
 target_file=
+target_func=
 invoke_args=
 is_print_source=false
+is_help=false
+is_help_plus=false
+
+#echo  @$BASH_SOURCE lineNo:$LINENO ---
 for arg in "$@";do
 if [[ $arg =~ "arg=" ]];then
-	invoke_args=${arg#*=}
-	echo invoke_args="$invoke_args"
+	invoke_args="${arg#*=}"
+	#echo  @$BASH_SOURCE lineNo:$LINENO ---
 else
 	if [[ $arg =~ (print_source|source) ]];then
 		is_print_source=true;
-	elif [[ -z $files ]];then
-		echo "テスト対象ファイルの指定は一個まで"
-		continue;
+	#elif [[ ! $arg =~ help\+? && -z $files ]];then
+	#	echo "テスト対象ファイルの指定は一個まで"
+	#	echo 引数 $arg でエラー
+		#continue;
+	#	exit 1;
+	elif [[ $arg =~ help\+? ]];then
+		is_help=true
+		if [[ $arg == "help+" ]];then
+			is_help_plus=true
+		fi
+	elif [[ -n $target_file && $arg =~ ^([0-9]{1,3}|.*)$ ]];then
+		if [[ $BASH_REMATCH =~ [a-zA-Z]* ]];then
+			arg=${arg##*=}
+		fi
+		target_func="$arg"
 	fi
 	for file in ${files[@]};do
 		TMP=$IFS
@@ -24,8 +44,8 @@ else
 		do
 			if [[ $arg == $name_word ]];then
 				target_file="$file"
-				echo target_file=$target_file
-				unset files
+				#echo target_file=$target_file
+				unset files file
 				break
 			fi
 		done
@@ -33,22 +53,71 @@ else
 fi
 done
 
+function target_help(){
+	# 対象ファイルパスを引数でもらう
+	local all_functions=$(get_target_functions)
+	local x=0;
+	echo
+	echo "$dir/$target_file の関数一覧"
+	for func in ${all_functions[@]};do
+		echo "$x) $func" 
+		((x++))
+	done
+	echo
+	echo 例： ./test_shell logger source arg="..."
+	echo 例： ./test_shell file_word function\(func_num\) arg="..."
+
+	echo 対象ファイルを指定する場合は arg=\"function='...' file='...'\"
+	if $is_help_plus;then
+    	ls ./Downloads/twitter-archive/logger*|sed 's/.*\///'
+	else
+		echo 対象ファイルも表示する場合は \" help+ \"を指定
+	fi
+    exit 0
+}
+
+function get_target_functions(){
+	# 対象ファイルパスを引数でもらう
+	cat  "$dir/$target_file"|grep -E "function (.*)\(\)\{"|sed -E "s/function (.*)\(\)\{/\1/"
+}
+
 if [[ -z $target_file ]];then
-	echo　テスト対象ファイルの取得失敗
+	echo テスト対象ファイルの取得失敗
 	echo source help 等の指定はスペースをあけて
-	echo 例：./test_shell logger source arg="..."
-	return
+	echo 例： ./test_shell logger source arg="..."
+	exit 0;
+elif [[ -n $target_func ]];then
+	all_functions=($(get_target_functions))
+	if [[ $target_func =~ ^[0-9]{1,3}$ ]];then
+		target_func=${all_functions[$target_func]}
+	fi
+	if [[ -z $target_func || ! "${all_functions[@]}" =~ "$target_func" ]];then
+		echo 指定した関数の名前が違ってるか存在しない
+		target_help
+		exit 1
+	fi
+
+elif $is_help;then
+	target_help
+	exit 0;
 fi
-echo invoke $target_file "\"$invoke_args\""
+
 if $is_print_source;then
 	echo srource is
 	echo
-	cat ./test_shell.d/$target_file
+	cat ./$dir/$target_file
 	echo
 	echo
 	echo ================= execute =====================
 	echo
 	echo
 fi
+echo
+echo -e "target file is\t\t./test_shell.d/$target_file "
+echo -e "invoke function is\t$target_func ${invoke_args:-\"no args\"}"
+echo
+echo ============================== $BASH_SOURCE is end. invoke $target_file ${invoke_args:-\"no args\"} =========================
+echo
 
 ./test_shell.d/$target_file "$invoke_args"
+

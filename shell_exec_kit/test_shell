@@ -1,7 +1,6 @@
 #!/bin/bash
 echo ============================== $BASH_SOURCE is run. \$@= \" $@ \" =========================
 
-
 dir="test_shell.d"
 files=($(ls --color=never $dir))
 target_file=
@@ -29,27 +28,27 @@ else
 		if [[ $arg == "help+" ]];then
 			is_help_plus=true
 		fi
-	elif [[ -n $target_file && $arg =~ ^([0-9]{1,3}|.*)$ ]];then
+	elif [[ -n $target_file && $arg =~ ^[0-9]{1,3}$ ]];then
 		if [[ $BASH_REMATCH =~ [a-zA-Z]* ]];then
 			arg=${arg##*=}
 		fi
 		target_func="$arg"
-	fi
-	for file in ${files[@]};do
-		TMP=$IFS
-		IFS=$'_'
-		file_name_words=($file)
-		IFS=$TMP
-		for name_word in ${file_name_words[@]};
-		do
-			if [[ $arg == $name_word ]];then
-				target_file="$file"
-				#echo target_file=$target_file
-				unset files file
-				break
-			fi
+	elif [[ -z $target_file ]];then
+		for file in ${files[@]};do
+			TMP=$IFS
+			IFS=$'_'
+			file_name_words=($file)
+			IFS=$TMP
+			for name_word in ${file_name_words[@]};
+			do
+				if [[ $arg == $name_word ]];then
+					target_file="$file"
+					#echo target_file=$target_file
+					unset files file
+				fi
+			done
 		done
-	done
+	fi
 fi
 done
 
@@ -81,12 +80,19 @@ function get_target_functions(){
 	cat  "$dir/$target_file"|grep -E "function (.*)\(\)\{"|sed -E "s/function (.*)\(\)\{/\1/"
 }
 
+
 if [[ -z $target_file ]];then
 	echo テスト対象ファイルの取得失敗
 	echo source help 等の指定はスペースをあけて
 	echo 例： ./test_shell logger source arg="..."
+	echo
+	echo 対象ファイル一覧
+	for file in ${files[@]};do
+		echo $file
+	done
 	exit 0;
 elif [[ -n $target_func ]];then
+
 	all_functions=($(get_target_functions))
 	if [[ $target_func =~ ^[0-9]{1,3}$ ]];then
 		target_func=${all_functions[$target_func]}
@@ -119,5 +125,5 @@ echo
 echo ============================== $BASH_SOURCE is end. invoke $target_file ${invoke_args:-\"no args\"} =========================
 echo
 
-./test_shell.d/$target_file "$invoke_args"
+./test_shell.d/$target_file ${target_func:- } "$invoke_args"
 

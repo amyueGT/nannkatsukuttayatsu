@@ -1,0 +1,33 @@
+#!/bin/bash
+
+echo;echo;echo
+echo "============================ begin $BASH_SOURCE =========================="
+
+function call_fnction_refrection_like(){
+	local file="$1"
+	local target_func_num=$2
+	local all_functions=($(cat $file|grep -Eo -e"function (.*)\(\){"|sed -E -e's/function (.*)\(\)\{/\1/'))
+
+	if [[ -z $file || -z $target_func_num || ! $target_func_num =~ [0-9]+ || $@ =~ (help|-h) ]];then
+		echo 第一引数はファイルパス ---- 現在の設定は:${file:-"none"}
+		echo 第二引数は呼び出したい関数の番号を以下から（ファイルパスを指定すると表示
+		for ((x=0;x<${#all_functions[@]};x++));do
+			echo "$x) ${all_functions[$x]}"
+		done
+		exit 0;
+	fi
+	shift;shift;
+
+	#echo "function ${all_functions[$1]}\(\)\{"
+	local func_begin=$(cat $file|grep -Eno -e"function ${all_functions[$target_func_num]}\(\)\{"|cut -d":" -f1)
+	local func_end=$(cat $file|tail -n+$func_begin|grep -Eno -e"^}"|head -n1|cut -d":" -f1)
+	local func_text="$(cat $file|sed -n $func_begin,$((func_begin+func_end))p)"
+	echo;echo
+	echo "============================ invoke ${all_functions[$target_func_num]} $@"
+	eval "$func_text;${all_functions[$target_func_num]} \"$@\"; "
+}
+
+call_fnction_refrection_like $@
+
+echo;echo;echo
+echo "============================ end $BASH_SOURCE =========================="

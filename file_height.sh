@@ -27,7 +27,7 @@ POINTS_PER_DPI=72 # google にて「文字サイズ ピクセル数」等で検�
 DPI=$(xdpyinfo | grep -e"resolution"|cut -d' ' -f7|cut -d"x" -f1) #96
 DPI=${DPI:=$DEFAULT_DOTS_PER_INCHIS}
 
-FILE=/home/pi/.csl-log
+FILE=/home/oreore/.csl-log
 FILE_LINES=$(wc -l $FILE|cut -d' ' -f1)
 
 CURRENT_CHAR_POINTS=${1}

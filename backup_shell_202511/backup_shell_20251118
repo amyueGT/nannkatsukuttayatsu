@@ -1,0 +1,509 @@
+#!/usr/bin/bash
+
+BACKUP_SOURCE_ROOT=/home/backup
+BACKUP_DEST_HOME=/home/backup/dest/home
+BACKUP_DEST_ROOT=${BACKUP_DEST_HOME}/backup_root
+
+LOG_FILE=/tmp/backup_log
+LOG_TMP_FILE=/tmp/backup_log_tmp
+
+TYPE_F=0
+TYPE_HF=1
+TYPE_D=2
+TYPE_HD=3
+#start_fd="exec 10>$LOG_FILE"
+#stop_fd="exec 10>&-"
+#redirect_to_log_file='>&10 2>&10'
+
+EXCEPTION=()
+
+function backup_202511_help(){
+	echo "################# ${BASH_SOURCE##*/} help ###################"
+	echo
+	echo "-s  --simulation : ログだけを表示で作成されるパスの確認 デフォ設定"
+	echo "-e  --execute : 実際にバックアップをとる"
+	echo "-d  --detail : 詳細なログを出力 (ログを減らして速度アップ"
+	echo "--whole_home : ${HOME}をすべてバックアップ @[${BACKUP_DEST_ROOT}/yyyyddmm/${HOME} ]"
+	echo "-l --logfile : ログファイルのパスを指定 デフォ:[$LOG_FILE]"
+	echo "-g --debug[=num] : デバッグ用に回数を制限して実行する"
+	echo "-h  --help : helpを出力"
+	echo
+	echo "################# ${BASH_SOURCE##*/} help end ###################"
+}
+
+
+mode_at_status+="simulation "
+is_detail=false
+is_whole=false
+is_sim=true
+is_debug=false
+for arg in "$@";do
+	if [[ $arg =~ (-h|--help) ]];then
+		backup_202511_help
+		exit
+	fi
+
+	if [[ $arg =~ (-e|--execute) && ! "$@" =~ (-s|--simulation) ]];then
+		is_sim=false
+	fi
+	if [[ $arg =~ (-s|--simulation) ]];then
+		is_sim=true
+	fi
+	if [[ $arg =~ (-d|--detail) ]];then
+		is_detail=true
+		mode_at_status+="detail "
+	fi
+	if [[ $arg =~ (--whole_home) ]];then
+		is_whole=true
+		mode_at_status+="whole_home "
+	fi
+	if [[ $arg =~ (-l|--logfile) ]];then
+		LOG_FILE="$arg"
+	fi
+	if [[ $arg =~ (-g|--debug) ]];then
+		arg=${arg##*debug}
+		arg=${arg##*g}
+		arg=${arg##*=}
+		debug_count="${arg:-5}"
+		is_debug=true
+	fi
+	
+	mode_at_status=${mode_at_status}
+done
+
+
+function backup_202511_confirm(){
+	if ! $is_sim;then
+		mode_at_status=${mode_at_status//simulation /execute }
+	fi
+
+	printf " %*s: %s\n" 9 "mode" "${mode_at_status}"
+	printf " %*s: %s\n" 9 "log file" "$LOG_FILE"
+	echo -n "以上の設定で"
+	if $is_sim;then
+		for sec in {5..1};do
+			echo "cpの空打ちが${sec}秒後に実行されるぞ。"
+			sleep 1
+		done;
+	else
+		echo "実際にバックアップが実行されるぞ。okならyそうでないならそれ以外"
+		read res ;
+		if [[ $res == y ]];then
+			#mode_at_status+="execute "
+			:
+		else
+			echo y以外が選択されたため終了
+			exit
+		fi
+	fi
+}
+
+function backup_202511_init(){
+	if [[ ! -d $BACKUP_DEST_ROOT && -e /dev/sda2 ]];then
+		if ! mkdir --parents $BACKUP_DEST_ROOT|| sudo mount -am;then
+			mkdir --parents $BACKUP_DEST_ROOT
+		fi
+	fi
+	if [[ ! -d $BACKUP_DEST_ROOT ]];then
+		echo "外付けストレージがないため終了"
+		exit
+	fi
+	start_date=$(date)
+
+	printf "\033[%d;%dr" "1" "$((LINES-1))"
+
+	tmp_IFS=$IFS
+	IFS=$'\n'
+	pwd=$PWD
+
+	#eval "$start_fd"
+	echo > $LOG_FILE #内容をリセット
+	echo > $LOG_TMP_FILE
+	#pid=$BASHPID
+	exec 10>$LOG_FILE
+	exec 11>$LOG_TMP_FILE
+	LOG_TMP_FILE_fd="/proc/$BASHPID/fd/11"
+	printf "\033[2J\033[H"
+	printf "\033[%d;%dr" "1" "$((LINES-1))" # >&3
+
+	is_tstop=false
+	# SIGTSTP 中断からのfinallyはうまく行かない
+	#ctrl+z:SIGTSTP ctrl+c:SIGINT fg:SIGCONT
+	trap 'backup_202511_finally SIGINT;' SIGINT
+	trap 'is_tstop=true;' SIGTSTP
+	#trap 'fg;kill -SIGINT $BASHPID;' SIGTSTP
+	#trap 'backup_202511_finally SIGTSTP;' SIGTSTP
+	#trap 'echo $BASHPID;backup_202511_finally SIGTSTP $BASHPID;kill -SIGCONT $BASHPID;' SIGTSTP
+}
+
+function backup_202511_finally(){
+	end_date=$(date)
+	logecho ""
+	logecho "===============${BASH_SOURCE}"
+
+	if [[ -n ${EXCEPTION[@]} ]];then
+		logecho ${EXCEPTION[@]}
+	fi
+	if [[ $1 == SIGINT ]];then
+		logecho "recieve signal:SIGINT"
+	 	logecho "executing  dirs :$dir_count/$total_dir"
+		logecho "executing files :$target_count/$total_target"
+	else
+		logecho "たぶん全部実行済み"
+	fi
+	logecho
+	logecho "mode was :$mode_at_status"
+	logecho "fail count was :$fail_count"
+	logecho "backup_log output at :$LOG_FILE"
+	logecho "begin at :$start_date"
+	logecho "end at :$end_date"
+	logecho "finally done"
+	#eval "$stop_fd"
+
+	exec 10>&-
+	exec 11>&-
+	IFS=$tmp_IFS
+	#printf "\033[%d;%dr\e[%dB" "1" "$LINES" "$LINES"
+	printf "\033[%d;%dr" "1" "$LINES"
+	printf "\e[%dB" "$LINES"
+	printf "%*s" $COLUMNS
+	exit
+}
+
+
+function backup_202511(){
+
+	dest_dir=$BACKUP_DEST_ROOT
+	target_list=($(find $BACKUP_SOURCE_ROOT -maxdepth 1|grep -v -etar -ebackup_root|tail -n +2));
+	append_text="bkup$(date +'%Y%m%d%H%M%S')"
+	if $is_whole;then	
+		dest_dir+=/whole_home/$append_text
+	else
+		append_text="_${append_text}";
+	fi
+	dest_dir_root=$dest_dir
+	#declare -p target_list >&10 2>&10
+	total_dir=${#target_list[@]}
+	dir_count=0;
+	fail_count=0;
+	total_target=
+
+	if $is_detail;then
+		logecho total_dir=$total_dir;
+		logecho append_text=$append_text;
+		logecho "上二行のtotal_dir append_textはあとで "
+	fi
+
+	for source_root in "${target_list[@]}";do
+		((dir_count++))
+		#^(/dev|/bin|/sys|/sbin|/root|/mnt)
+		if [[ ${source_root##*/} =~ test || $source_root == $BACKUP_SOURCE_ROOT ]];then 
+			detail_logecho source_root=$source_root : BACKUP_SOURCE_ROOT=$BACKUP_SOURCE_ROOT : 同じディレクトリのためcontinue;
+			continue;
+		fi
+		target=($(find $source_root))
+		total_target=${#target[@]};
+		target_count=0;
+		#declare -p target
+		append_text="_bkup$(echo $source_root|sed -En 's/.*_([0-9]{8,12}).*/\1/p')"
+		if $is_detail;then
+			logecho append_text=$append_text;
+			logecho source_root=$source_root;
+			logecho source_rootsed=$(echo $source_root|sed -En 's/.*_([0-9]{8,12}).*/\1/p');
+		fi
+
+		for source in "${target[@]}";do
+			((target_count++))
+			print_status
+			if $is_tstop;then
+				return
+			fi
+			if [[  "$source" == "$source_root" ]];then continue;fi
+			source_path="${source#$source_root\/}"
+#if [[ ! $source_path =~ ".local" ]];then
+#	continue
+#fi
+			#echo -n $source----$path---- ; if [[ -f $source ]];then echo ffff;elif [[ -d $source ]];then echo dddd;else echo oooo;fi
+			is_home_dir=false
+			if [[ ${source_path} =~ ^home/backup_home/ ]];then
+				source_path="${source_path##*home/backup_home/}"
+				is_home_dir=true
+			fi
+
+			dest_dir=$dest_dir_root
+			if [[ -e /home/backup_home/${source_path%/*} ]];then # -e exist file/dir
+				detail_logecho "homeディレクトリ直下 ${source_path}";
+				dest_dir+=/home/backup_home
+				is_home_dir=true
+				#if [[ -f $source ]];then
+				#	dest_dir+=/home_root
+				#fi
+			fi
+
+			if [[ ${source_path} =~ home/backup_home/ ]];then
+				# pathの先頭からhome/backup_home/を取り除いたあとでもhome/backup_home/を含むなら
+				detail_logecho " ${dest_dir}/other_home_backupディレクトリ $dest_dir/other_home_backup/${source_path%/*}";
+				#path="$path"
+				dest_dir+=/other_home_backup;
+				#is_home_dir=true
+			elif ! $is_home_dir ;then
+				if [[ -e /${source_path%%/*} ]];then
+					detail_logecho "system rootディレクトリ /${source_path%%/*}";
+					#source_path=/${source_path}
+				else
+					detail_logecho "unknown ディレクトリ /${source_path%%/*}";
+					dest_dir+=/unknown_source_backup
+				fi
+			fi
+
+			file_type=
+			if [[ -f $source ]];then
+				if [[ ${source##*/} =~ ^"." ]];then
+					file_type=_HF
+					is_type=$TYPE_HF
+				else
+					file_type=_F
+					is_type=$TYPE_F
+				fi
+			elif [[ -d $source ]];then
+				if [[ ${source##*/} =~ ^"." ]];then
+					file_type=_HD
+					is_type=$TYPE_HD
+				else
+					file_type=_D
+					is_type=$TYPE_D
+				fi
+			fi
+
+			hidden_parent_dir=
+			words=(${source_path//\//$'\n'});
+			for((x=0;x<${#words[@]}-1;x++ ));do 
+				if [[ ${words[$x]} =~ ^"." ]];then
+					is_type=$TYPE_HD
+					file_type=_HD
+					printf -vhidden_parent_dir "/%s" ${words[@]:0:$((x+1))}
+					hidden_parent_dir=${hidden_parent_dir#/}
+					break
+				fi
+			done
+			x=$((${#words[@]}-1))
+			if [[ -z $hidden_parent_dir ]];then hidden_parent_dir=${words[$x]};fi
+
+			if $is_detail;then
+				logecho source=$source
+				logecho source_root=$source_root
+				logecho source_path=$source_path
+				logecho hidden_parent_dir=$hidden_parent_dir
+				logecho \${words[$x]}=${words[$x]}
+				logecho dest_dir=$dest_dir
+				logecho append_text=$append_text
+				logecho file_type=$file_type
+			fi
+
+			if ((is_type>=TYPE_D));then
+				if ((is_type==TYPE_HD));then
+					dest_dir+=/${hidden_parent_dir}${append_text}${file_type}
+					#dest_dir+=/${hidden_parent_dir}${append_text}${file_type}
+					if $is_sim && [[ ${sim_made_dir[@]} =~ ${dest_dir} ]] ||
+						 [[ -d ${dest_dir} ]];then
+						detail_logecho "すでにバックアップ済み隠しディレクトリのためスキップ:${dest_dir}";
+						continue;
+					fi
+					logecho "HD --- mkdir --parents \"${dest_dir}\"";
+					if $is_sim;then 
+						sim_made_dir+=($dest_dir)
+					else
+						mkdir --parents "${dest_dir}" >&11 2>&11;
+						rtn_code=$?;if [[ $rtn_code != 0 ]];then
+							((fail_count++));
+							print_data $rtn_code "lineNo:$LINENO" "HD mkdir"
+						else
+							result_logecho $rtn_code
+						fi
+					fi
+					#detail_logecho "move to ${source%${dest_dir##*/}*} ";
+					#cd ${source%${dest_dir##*/}*}
+					detail_logecho "move to $source_root/$source_path "
+					cd $source_root/$source_path >&11 2>&11;
+					rtn_code=$?;if [[ $? != 0 ]];then
+						detail_logecho "move to $source_root/$source_path is fail.bash error message is at next line."
+						result_logecho $rtn_code
+						if $is_home_dir;then
+							source_path=home/backup_home/$source_path
+						fi
+						detail_logecho "retry to move $source_root/$source_path"
+						cd $source_root/$source_path >&11 2>&11;rtn_code=$?;
+						if [[ $? != 0 ]];then
+							logecho "move to $source_root/$source_path is fail.bash error message is at next line."
+							print_data $rtn_code
+							logecho "どっかおかしいから修正が必要。end shell."
+							backup_202511_finally
+						fi
+					fi
+
+					logecho "HD cp -r --parents --preserve=all -P -t\"${dest_dir}\" . --@$source_root HD ";
+					if ! $is_sim;then 
+						cp -r --parents --preserve=all -P -t"$dest_dir" . >&11 2>&11;
+						rtn_code=$?;if [[ $rtn_code != 0 ]];then
+							((fail_count++));
+							print_data $rtn_code "lineNo:$LINENO" "HD cp";
+						else
+							result_logecho $rtn_code
+						fi
+					fi
+					detail_logecho "back to $pwd ";
+					cd $pwd
+				fi
+				#if [[ -d $source ]];then continue;fi #ただのディレクトリなら何もしない
+			else #if [[ -f $source ]];then
+				#ディレクトリでないなら
+				source_path+=${append_text}${file_type}
+				source_parents_dir=
+				if [[ ${source_path} =~ / ]];then
+					source_parents_dir=${source_path%/*}
+				fi
+				logecho "F mkdir --parents $dest_dir/${source_parents_dir} F";
+				if ! $is_sim;then 
+					mkdir --parents "$dest_dir/${source_parents_dir}" >&11 2>&11;
+					rtn_code=$?;if [[ $rtn_code != 0 ]];then
+						((fail_count++));
+						print_data $rtn_code "lineNo:$LINENO" "F mkdir"
+					else
+						result_logecho $rtn_code
+					fi
+				fi
+				logecho "F cp --preserve=all $source $dest_dir/${source_path}  --@$source_root F ";
+				if ! $is_sim;then 
+					cp --preserve=all "$source" "$dest_dir/${source_path}" >&11 2>&11;
+					rtn_code=$?;if [[ $rtn_code != 0 ]];then
+						((fail_count++));
+						print_data $rtn_code "lineNo:$LINENO" "F cp"
+					else
+						result_logecho $rtn_code
+					fi
+				fi
+			fi
+
+#			if [[ ${source##$source_root} =~ ^(/dev|/bin|/sys|/sbin|/root|/mnt|.cache) ]];then
+#				return
+#			fi
+
+			if [[ -n $debug_count ]] && ((target_count==debug_count));then
+				backup_202511_finally
+			fi
+
+		done
+	done
+
+}
+
+function detail_logecho(){
+	if $is_detail;then logecho "$@";fi
+}
+function logecho(){
+	#echo -en "\e[1M" #行を削除
+	#echo -en "\e[1A" #1行上に移動
+
+	echo "$@" >&10 2>&10;
+	tail -n$(echo "$@"| sed 's/\x1b\[[0-9;]*[a-zA-Z]//g'|wc -l) $LOG_FILE;
+
+	#echo -ne "abc";echo -en "\n\e[1AABC\e[1BDEF\e[1A";echo -en "XXX\e[1B\n" で以下のABCDEFXXXが出力される
+	#	ABC   XXX
+	#	  DEF
+
+	#declare ROW COL; IFS=';' read -sdR -p $'\E[6n' ROW COL;  echo "${ROW#*[}";echo -n "${COL#*[}"
+}
+
+function logcommand(){
+	echo "$@" >&10 2>&10;
+	$@;
+	tail -n$(echo "$@"| sed 's/\x1b\[[0-9;]*[a-zA-Z]//g'|wc -l) $LOG_FILE
+}
+
+function result_logecho(){
+#	printf -vcommand_erro_mess "%s" <$LOG_TMP_FILE_fd
+#	command_erro_mess=${command_erro_mess:-no command error message}
+	logecho "	return code is: $1"
+	if [[ -z $1 || ! $1 =~ ^[0-9]+$ ]];then
+		logecho "	return code is not found or not numeric"
+	elif [[ $1 -eq 0 ]];then
+		logecho "	command success"
+	elif [[ $1 -ne 0 && ! -s $LOG_TMP_FILE ]];then
+		logecho "	no command error messages"
+	else
+		logecho "	command error messages at next line"
+	fi
+	cat <$LOG_TMP_FILE_fd
+	cat <$LOG_TMP_FILE_fd >&10 2>&10;
+	echo -n >$LOG_TMP_FILE #空にする
+}
+
+function print_data(){
+	logecho -e "\r"
+	if [[ $1 -ne 0 ]];then
+		logecho "####################### eror data :$@"
+	fi
+	result_logecho $@
+	logecho "	source_root=$source_root"
+	logecho "	source=${source}"
+	logecho "	\${source##*/}=${source##*/}"
+	logecho "	\${source##\$source_root}=${source##$source_root}"
+	logecho
+	logecho "	source_path=$source_path"
+	logecho "	\${source_path\%/*}=${source_path%/*}"
+	logecho "	\${source_path\%\%/*}=${source_path%%/*}"
+	logecho 
+	logecho "	dest_dir=$dest_dir"
+	logecho "	\$dest_dir\${source_path%/*}=$dest_dir${source_path%/*}";
+	logecho "	$source: $(if [[ -e $source ]];then echo found; else echo not found;fi)"
+	logecho "	$dest_dir/${source_path%/*}: $(if [[ -e $dest_dir/${source_path%/*} ]];then echo found; else echo not found;fi)"
+	logecho "	$dest_dir/${source_path}: $(if [[ -e $dest_dir/${source_path} ]];then echo found; else echo not found;fi)"
+	if [[ $1 -ne 0 ]];then
+		logecho "####################### eror data end::$2 @$1"
+	fi
+
+}
+
+function print_status(){
+	#if ((target_count==500));then exit;fi
+	#printf "\033[%d;%dr\e[${LINES}B%s\033[%d;%dr" "$LINES" "$LINES" "files:$target_count/$total_target | dirs:$dir_count/$total_dir | fail:$fail_count" "1" "$((LINES-1))" # >&3
+	printf "\033[%d;%dr" "$LINES" "$LINES"
+	printf "\e[%dB" "$LINES"
+	#printf "\e[%dd" "$LINES"
+	printf "%*s" $COLUMNS
+	printf "files:%*d/%*d | dirs:%*d/%*d | fail:%*d || mode:%s" 5 $target_count 5 $total_target 5 $dir_count 5 $total_dir 4 $fail_count $mode_at_status
+	#printf "%s" "files:$target_count/$total_target | dirs:$dir_count/$total_dir | fail:$fail_count || mode:$mode_at_status"
+	printf "\033[%d;%dr" "1" "$((LINES-1))" # initでやってるため不要なはず - 必要だった
+	printf "\r\e[%dB" "$((LINES-1))"
+	#printf "\e[%dd\e[1G" "$((LINES-1))"
+	#sleep 2
+}
+
+
+function backup_202511_main(){
+	sigttstp_process(){
+		local is_not_end=true
+		while $is_not_end;do
+			if $is_tstop;then
+				logecho "in the $FUNCNAME"
+				ps |grep $FUNCNAME|cut -d' ' -f1|xargs fg
+				sleep 1
+				ps |grep ${BASH_SOURCE##*/}|cut -d' ' -f1|xargs kill -9
+				return
+			else
+				backup_202511
+				is_not_end=false
+			fi
+		done
+	}
+
+	backup_202511_init
+	backup_202511
+	backup_202511_finally
+
+}
+
+backup_202511_confirm
+backup_202511_init
+backup_202511
+backup_202511_finally

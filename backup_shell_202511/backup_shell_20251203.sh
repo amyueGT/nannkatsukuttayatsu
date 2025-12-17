@@ -7,8 +7,6 @@ BACKUP_DEST_HOME=/home/backup/dest/home
 BACKUP_DEST_ROOT=${BACKUP_DEST_HOME}/backup_root
 
 
-
-
 if [[ $(whoami) == root ]];then
 	LOG_FILE=/backup_shell_202511/tmp/backup_sudo_log
 	LOG_TMP_FILE=/backup_shell_202511/tmp/backup_log_sudo_tmp
@@ -33,7 +31,6 @@ else
 	done
 
 fi
-
 
 
 TYPE_F=0
@@ -69,8 +66,9 @@ function backup_202511_help(){
 	echo "== 今後の課題 =="
 	echo "・ --bind_dir時等にtarを作成する処理を追加できたらやる。tarアーカイブを作成して全部そこに追加する形にする（？）20251128"
 	echo "・ find時ディレクトリのみとファイルのみを分けてリスト上では一つにしたほうが良いかも(?)２重ループがおかしい 20251203"
-	echo "・ 以前にアップしたバックアップ用のシェルも全然使ってないしその後も別なのを作ってそれも結局ほぼ使ってないが、思いつきですぐできるつもりのところから想定を大幅に上回る作業試行をした。"
-	echo "								そもそも何が必要かがわかってないとも言えるが完成形をちゃんと設計想定せずに作ってるため後から後から修正の連鎖になってると言えなくもない。20251203"
+	echo "・ 以前にアップしたバックアップ用のシェルも全然使ってないがそのバックアップファイルを別の場所に移行するシェルに続けて"
+	echo "			移行先で常時使える形のシェルを思いつきですぐできるつもりのところから作り始めて想定を大幅に上回る作業試行をした。"
+	echo "				そもそも何が必要かがわかってないとも言えるが完成形をちゃんと設計想定せずに作ってるため後から後から修正の連鎖になってると言えなくもない。20251203"
 	echo "・ ロガーやbashでのデバッグのやり方が他の作成中のシェルにバラけて存在してるため全部まとめて色々付け加えたらたらシェルのデバッガーやロガーとしてそれっぽいのができそう 20251203"
 	echo 
 	echo "################# ${BASH_SOURCE##*/} help end ###################"
@@ -83,7 +81,6 @@ is_only_file=false
 is_only_hidden=false
 is_detail=false
 is_grep=false
-
 is_bind_dir=false
 is_bind_hidden_dir=false
 is_sim=true
@@ -109,7 +106,6 @@ for arg in $@;do
 		is_detail=true
 		mode_at_status+="detail "
 	fi
-
 	if [[ $arg =~ ^(--bind_dir) ]];then
 		is_bind_dir=true
 		mode_at_status+="bind_dir "
@@ -262,6 +258,7 @@ function backup_202511_init(){
 
 	dest_dir_root=$BACKUP_DEST_ROOT
 	append_text="bkup$(date +'%Y%m%d%H%M%S')"
+	append_text="_${append_text}";
 
 	tmp_IFS=$IFS
 	IFS=$'\n'
@@ -271,10 +268,10 @@ function backup_202511_init(){
 	echo > $LOG_FILE #内容をリセット
 	echo > $LOG_TMP_FILE
 	#pid=$BASHPID
-	exec 10>$LOG_FILE
-	exec 11>$LOG_TMP_FILE
-#	ls -l /proc/$BASHPID/fd/11 /proc/$BASHPID/fd/10
-	LOG_TMP_FILE_fd="/proc/$BASHPID/fd/11"
+	exec 40>$LOG_FILE
+	exec 44>$LOG_TMP_FILE
+#	ls -l /proc/$BASHPID/fd/44 /proc/$BASHPID/fd/40
+	LOG_TMP_FILE_fd="/proc/$BASHPID/fd/44"
 	printf "\e7\033[%d;%dr\e8\e[5S\e[3A\e[?25l" "1" "$((LINES-1))" #スクロールの範囲を指定してカーソルを隠す
 
 	excuting_source_root_count=0;
@@ -334,9 +331,6 @@ function console_ctrl(){
 	#fi
 
 	set_window_size
-
-
-
 }
 
 function backup_202511_finally(){
@@ -353,14 +347,17 @@ function backup_202511_finally(){
 		#else
 		fi
 		logecho "executed   sources :$excuting_source_root_count/$source_home_list_size"
-		logecho "executed sub_files :$excuting_source_count/$source_path_list_size_total"
+		logecho "executed sub_files :$excuting_source_count_total/$source_path_list_size_total"
 	fi
 	if [[ -n ${EXCEPTION[@]} || $1 == SIGINT ]];then
-		((${#EXCEPTION[@]} <= 0)) && for e in ${#EXCEPTION[@]};do
-			logecho ${EXCEPTION[$e]}
-		done
-		if [[ -n $source_path_list_size && -n ${EXCEPTION[@]} ]];then
+		logecho 
+		((${#EXCEPTION[@]} > 0)) && logecho "<< 発生したエラー >>" && for e in ${EXCEPTION[@]};do
+			logecho "$e"
+		done && logecho ""
+		if [[ $source_path_list_size -gt 0 && -n ${EXCEPTION[@]} ]];then
 			logecho それ以外は多分全部実行できた
+		elif $is_sim;then
+			logecho "simulation モードだから実際のバックアップはまだやってないぞ"
 		else
 			logecho まだバックアップは何も実行してないぞ #successをカウントして件数表示
 		fi
@@ -376,9 +373,10 @@ function backup_202511_finally(){
 	logecho "finally done"
 	#eval "$stop_fd"
 
-	exec 10>&-
-	exec 11>&-
+	exec 40>&-
+	exec 44>&-
 	IFS=$tmp_IFS
+	rm $LOG_TMP_FILE
 	# printf "\033[%d;%dr\e[%dB" "1" "$LINES" "$LINES"
 	printf "\033[%d;%dr" "1" "$LINES"
 	printf "\e[%dB" "$LINES"
@@ -404,8 +402,9 @@ function backup_202511(){
 	for name in ${BACKUP_SOURCE_specified[@]};do
 		source_tmp_list=()
 		name=${name%/}
-
-		logecho -n "/${name#/}の有無確認..."
+		# このシェルというより端末の問題で
+		# このセクションがターミナル上ではスクロールで画面外に出た後に一部表示が消える
+		logecho -n "/${name#/}の有無確認..." 
 		
 		#source_tmp_list=($(find /${name#/} -maxdepth 0 2> /dev/null))
 		#if [[ -z ${source_tmp_list[@]} ]];then
@@ -449,7 +448,8 @@ function backup_202511(){
 	if $is_only_hidden;then
 		find_option=" -maxdepth 1 ${find_option} -regex '.*\/\..*'"
 	fi
-  excuting_source_count_total=0
+
+	excuting_source_count_total=0
 	for source_home in "${source_home_list[@]}";do
 		((excuting_source_root_count++))
 		source_path_list=
@@ -490,6 +490,7 @@ function backup_202511(){
 		source_home=${source_home#/}
 		source_path_list_size=${#source_path_list[@]};
 		excuting_source_count=0;
+		
 		((source_path_list_size_total+=source_path_list_size))
 
 		for source_path in "${source_path_list[@]}";do
@@ -638,16 +639,16 @@ function backup_202511(){
 				else
 					logecho -n "${file_type#_} --- mkdir --parents \"${dest_dir}\"";
 					if command_confirm "mkdir";then
-						if ! $is_sim;then mkdir --parents "${dest_dir}" >&11 2>&11;rtn_CODE=$?;fi
+						if ! $is_sim;then mkdir --parents "${dest_dir}" >&44 2>&44;rtn_CODE=$?;fi
 					fi
 					result_logecho 
 				fi
 				logecho -n "move to cd:${source_path_dirs}"
-				cd ${source_path_dirs} >&11 2>&11;rtn_CODE=$?;
+				cd ${source_path_dirs} >&44 2>&44;rtn_CODE=$?;
 				result_logecho
 				logecho -n "${file_type#_} cp -r --parents --preserve=all -t\"${dest_dir}\" . --@$PWD ${file_type#_} ";
 				if command_confirm "cp";then
-					if ! $is_sim;then cp -r --parents --preserve=all -t"$dest_dir" . >&11 2>&11;rtn_CODE=$?;fi
+					if ! $is_sim;then cp -r --parents --preserve=all -t"$dest_dir" . >&44 2>&44;rtn_CODE=$?;fi
 				fi
 				result_logecho 
 				logecho "back to cd:$pwd ";
@@ -660,13 +661,13 @@ function backup_202511(){
 				else
 					logecho -n "F mkdir --parents $dest_dir F";
 					if command_confirm "mkdir";then 
-						if ! $is_sim;then mkdir --parents "$dest_dir" >&11 2>&11;rtn_CODE=$?;fi
+						if ! $is_sim;then mkdir --parents "$dest_dir" >&44 2>&44;rtn_CODE=$?;fi
 					fi
 					result_logecho
 				fi
 				logecho -n "F cp --preserve=all $source_path $dest_path --@$PWD F ";
 				if command_confirm "cp";then 
-					if ! $is_sim;then cp --preserve=all "$source_path" "$dest_path" >&11 2>&11;rtn_CODE=$?;fi
+					if ! $is_sim;then cp --preserve=all "$source_path" "$dest_path" >&44 2>&44;rtn_CODE=$?;fi
 				fi
 				result_logecho
 			fi
@@ -679,7 +680,9 @@ function backup_202511(){
 
 			print_data $@
 		done
+		logecho ""
 	done
+	logecho ""
 
 }
 
@@ -692,10 +695,11 @@ function debug_logecho(){
 }
 
 function logecho(){
-	opt=
-	ofs=0
+	#opt=
+	new_line="\n"
 	if [[ $1 == -n ]];then
-		opt=-n
+		#opt=-n
+		new_line=
 		shift
 	elif [[ $1 == -h ]];then
 		#ヒアドキュメントで入力
@@ -703,8 +707,10 @@ function logecho(){
 		set -- "$(cat $@)"
 	fi
 
-	echo $opt "$@"
-	echo $opt "$@" >&10 2>&10;
+#	echo $opt "$@"
+#	echo $opt "$@" >&40 2>&40;
+	printf "%s$new_line" "$@";
+	printf "%s$new_line" "$@" >&40 2>&40;
 	#if [[ -z $opt ]];then
 	#	tail -n$(echo "$@"| sed 's/\x1b\[[0-9;]*[a-zA-Z]//g'|wc -l) $LOG_FILE;
 	#fi
@@ -717,7 +723,7 @@ function logecho(){
 }
 
 function logcommand(){ #コマンドのログを出しつつ実行させようとしたやつ。ローカルではこれに応用できそうなものを既に実用してるがこれは未完成。
-	echo "$@" >&10 2>&10;
+	echo "$@" >&40 2>&40;
 	$@;
 	tail -n$(echo "$@"| sed 's/\x1b\[[0-9;]*[a-zA-Z]//g'|wc -l) $LOG_FILE
 }
@@ -744,7 +750,7 @@ function result_logecho(){
 		logecho ":return code is not found or not numeric $@ @lineNo:${BASH_LINENO[0]}"
 	fi
 	cat <$LOG_TMP_FILE_fd;
-	cat <$LOG_TMP_FILE_fd >&10 2>&10;
+	cat <$LOG_TMP_FILE_fd >&40 2>&40;
 	printf "" >$LOG_TMP_FILE #空にする echoだと遅い echo-nだと^@が積み重なった
 
 	rtn_CODE=
@@ -867,27 +873,101 @@ function command_confirm(){
 
 function print_status(){
 	# mode:までで53文字+${#mode_at_status}>$COLUMNS then $((53+${#mode_at_status}/$COLUMNS))+$((53+${#mode_at_status%$COLUMNS>0}))then +1
-	status_lines=0;	
+	#status_lines=0;
 	#max_chars=53
-	max_chars=57
+	#max_chars=57
 	trimed_mode_at_status=
 
+
 	console_ctrl #$CCTRL_WIN_SIZE
-	if (((max_chars+${#mode_at_status})>=${COLUMNS}));then
-		trimed_mode_at_status=${mode_at_status:0:$(($COLUMNS-max_chars-3))}
+	#if (((max_chars+${#mode_at_status})>=${COLUMNS}));then
+	#	trimed_mode_at_status=${mode_at_status:0:$(($COLUMNS-max_chars-3))}
+	#	colomn_end=">"
+	#else
+	#	trimed_mode_at_status=${mode_at_status}
+	#	colomn_end=
+	#fi
+	#printf "\033[%d;%dr" "$LINES" "$LINES"
+	console_lines=$LINES
+	printf "\e7\e[%d;1#!/usr/bin/bash
+
+#BACKUP_SOURCE_ROOT=/home/backup
+BACKUP_SOURCE_specified=
+BACKUP_DEST_HOME=/home/backup/dest/home
+#BACKUP_DEST_HOME=/home/backup
+BACKUP_DEST_ROOT=${BACKUP_DEST_HOME}/backup_root
+
+
+
+
+if [[ $(whoami) == root ]];then
+	LOG_FILE=/backup_shell_202511/tmp/backup_sudo_log
+	LOG_TMP_FILE=/backup_shell_202511/tmp/backup_log_sudo_tmp
+else
+	LOG_FILE=/backup_shell_202511/tmp/backup_log
+	LOG_TMP_FILE=/backup_shell_202511/tmp/backup_log_tmp
+
+	while true;do
+		read -p"sudo権限がついてないけど実行する？ e + enter で続行:" res
+		if [[ $res == e ]];then 
+			break
+		else
+			if [[ "${BASH_SOURCE[0]}" != "$0" && "${FUNCNAME[@]}" == *source ]]; then
+				# ソース実行
+				echo ソース実行
+				return
+			else #if [[ "${FUNCNAME[@]}" == *main ]]; then
+				echo スクリプト実行
+				exit
+			fi
+		fi
+	done
+
+fi
+
+
+
+TYPE_F=0
+TYPE_HF=1
+TYPE_D=2
+TYPE_HD=3
+
+EXCEPTION=()
+
+function backup_202511_help(){
+	echo "################# ${BASH_SOURCE##*/} help ###################"
+	echo
+	echo "-c  --source[=dir1,dir2,..dirN] : バックアップのソースを指定。カンマ区切り"
+	echo "-i  --ignore[=word1,word2,..wordN] : 除外するワードを指定。カンマ区切り"
+	echo "-s  --simulation : ログだけを表示で作成されるパスの確認 デフォ設定"
+	echo "-e  --execute : 実際にバックアップをとる"
+	echo "-d  --detail : 詳細なログを出力 (ログを減らして速度アップ"
+	echo "    --whole_home : ${HOME}をすべてバックアップ @[${BACKUP_DEST_ROOT}/yyyyddmm/${HOME} ]"
+	echo "    --bind_dir : ディレクトリの場合内部を見ずに[dir_name_bkyyyyddmm]のようにまとめる"
+	echo "    --bind_hidden_dir : 隠しディレクトリの場合内部を見ずに[.hidden_dir_name_bkyyyyddmm]のようにまとめる"
+	echo "    --only_dir : ディレクトリのみをfindする"
+	echo "    --only_file : ファイルのみをfindする"
+	echo "    --only_hidden : 隠しファイル/ディレクトリのみをfindする"
+	echo "-f  --confirm : ファイル一つ一つ実行するか確認する "
+	echo "-g  --grep[=regex] : egrep で対象ファイルの絞り込み。"
+	echo "-G  --GREP : 大抵のバックアップファイルは [ _20[0-9]{10,12}$|bkup|~$ ]で絞り込み可能なためオプション化"
+	echo "-l  --logfile : ログファイルのパスを指定 デフォ:[$LOG_FILE]"
+	echo "-h  --help : helpを出力"
+H" "$console_lines" # \e[%d;1H と \e[%dd は同じ意味"
+	printf "\e[M" # カーソルの行を削除 #printf "\e[K" #カーソル位置から後ろを削除 (前は1K) #printf "%*s\r" $COLUMNS
+
+	printf -vtrimed_mode_at_status "sub_files:%*d/%*d | sources:%*d/%*d | fail:%*d || mode:%s" 5 $excuting_source_count 5 $source_path_list_size 5 $excuting_source_root_count 5 $source_home_list_size 4 $fail_count $mode_at_status
+	colm=${COLUMNS}
+	if ((${#trimed_mode_at_status}>=colm));then
 		colomn_end=">"
 	else
-		trimed_mode_at_status=${mode_at_status}
 		colomn_end=
 	fi
-	#printf "\033[%d;%dr" "$LINES" "$LINES"
-	printf "\e7\e[%d;1H" "$LINES"
-	printf "\e[K" #printf "%*s\r" $COLUMNS
 
-	printf "sub_files:%*d/%*d | sources:%*d/%*d | fail:%*d || mode:%s\e[7m%s\e[0m" 5 $excuting_source_count 5 $source_path_list_size 5 $excuting_source_root_count 5 $source_home_list_size 4 $fail_count $trimed_mode_at_status $colomn_end #実行中コンソール窓をサイズ変更するとバグる
+	printf "%s\e[7m%s\e[0m" "${trimed_mode_at_status:0:$((colm-1))}" $colomn_end #実行中コンソール窓をサイズ変更するとバグる
 	#printf "files:%*d/%*d | dirs:%*d/%*d | fail:%*d || mode:%s\e[7m%s\e[0m" 5 $excuting_source_count 5 $source_path_list_size 5 $excuting_source_root_count 5 $source_home_list_size 4 $fail_count $trimed_mode_at_status $colomn_end #実行中コンソール窓をサイズ変更するとバグる
-	#printf "\033[%d;%dr" "1" "$((LINES-1))" 
-	printf "\r\e[%dB\e8" "$((LINES-1))"
+	#printf "\033[%d;%dr" "1" "$((LINES-1))"
+	printf "\e8"
 }
 
 function backup_202511_main(){

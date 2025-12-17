@@ -760,7 +760,7 @@ function print_data(){
 	if $is_debug;then
 		logecho -e "\r"
 		logecho -n "####################### print_data lineNo:${BASH_LINENO[0]} "
-		logecho -h <<-EOS 
+		logecho -h <<-EOS
 			source_roots:$excuting_source_root_count/$source_home_list_size
 			targets     :$excuting_source_count/$source_path_list_size
 			fails       :$fail_count
@@ -785,7 +785,7 @@ function print_data(){
 			$(printf "%*s" ${#BACKUP_DEST_ROOT})$source_path: $(if [[ -e $source_path ]];then echo found; else echo not found;fi)
 			$dest_dir: $(if [[ -e $dest_dir ]];then echo found; else echo not found;fi)
 			$dest_path: $(if [[ -e $dest_path ]];then echo found; else echo not found;fi)
-			EOS
+EOS
 		logecho -n "####################### print_data lineNo:${BASH_LINENO[0]} "
 		logecho ":$@ :end"
 	fi
@@ -832,7 +832,7 @@ function command_confirm(){
 				l + enter :対象ファイルを一覧する
 				c + enter :キャンセルして次のファイルへ
 				f or q + enter :キャンセルして終了
-				EOS
+EOS
 	}
 	if $is_command_confirm ;then
 		logecho ""
@@ -852,7 +852,7 @@ function command_confirm(){
 				logecho "====== バックアップ対象ファイル一覧"
 				logecho -h <<-EOS
 					$(printf "%s\n" ${source_path_list[@]})
-					EOS
+EOS
 				logecho "######################################### confirm print : list end"
 				print_info
 			elif [[ $res == "c" ]];then
@@ -889,71 +889,7 @@ function print_status(){
 	#fi
 	#printf "\033[%d;%dr" "$LINES" "$LINES"
 	console_lines=$LINES
-	printf "\e7\e[%d;1#!/usr/bin/bash
-
-#BACKUP_SOURCE_ROOT=/home/backup
-BACKUP_SOURCE_specified=
-BACKUP_DEST_HOME=/home/backup/dest/home
-#BACKUP_DEST_HOME=/home/backup
-BACKUP_DEST_ROOT=${BACKUP_DEST_HOME}/backup_root
-
-
-
-
-if [[ $(whoami) == root ]];then
-	LOG_FILE=/backup_shell_202511/tmp/backup_sudo_log
-	LOG_TMP_FILE=/backup_shell_202511/tmp/backup_log_sudo_tmp
-else
-	LOG_FILE=/backup_shell_202511/tmp/backup_log
-	LOG_TMP_FILE=/backup_shell_202511/tmp/backup_log_tmp
-
-	while true;do
-		read -p"sudo権限がついてないけど実行する？ e + enter で続行:" res
-		if [[ $res == e ]];then 
-			break
-		else
-			if [[ "${BASH_SOURCE[0]}" != "$0" && "${FUNCNAME[@]}" == *source ]]; then
-				# ソース実行
-				echo ソース実行
-				return
-			else #if [[ "${FUNCNAME[@]}" == *main ]]; then
-				echo スクリプト実行
-				exit
-			fi
-		fi
-	done
-
-fi
-
-
-
-TYPE_F=0
-TYPE_HF=1
-TYPE_D=2
-TYPE_HD=3
-
-EXCEPTION=()
-
-function backup_202511_help(){
-	echo "################# ${BASH_SOURCE##*/} help ###################"
-	echo
-	echo "-c  --source[=dir1,dir2,..dirN] : バックアップのソースを指定。カンマ区切り"
-	echo "-i  --ignore[=word1,word2,..wordN] : 除外するワードを指定。カンマ区切り"
-	echo "-s  --simulation : ログだけを表示で作成されるパスの確認 デフォ設定"
-	echo "-e  --execute : 実際にバックアップをとる"
-	echo "-d  --detail : 詳細なログを出力 (ログを減らして速度アップ"
-	echo "    --whole_home : ${HOME}をすべてバックアップ @[${BACKUP_DEST_ROOT}/yyyyddmm/${HOME} ]"
-	echo "    --bind_dir : ディレクトリの場合内部を見ずに[dir_name_bkyyyyddmm]のようにまとめる"
-	echo "    --bind_hidden_dir : 隠しディレクトリの場合内部を見ずに[.hidden_dir_name_bkyyyyddmm]のようにまとめる"
-	echo "    --only_dir : ディレクトリのみをfindする"
-	echo "    --only_file : ファイルのみをfindする"
-	echo "    --only_hidden : 隠しファイル/ディレクトリのみをfindする"
-	echo "-f  --confirm : ファイル一つ一つ実行するか確認する "
-	echo "-g  --grep[=regex] : egrep で対象ファイルの絞り込み。"
-	echo "-G  --GREP : 大抵のバックアップファイルは [ _20[0-9]{10,12}$|bkup|~$ ]で絞り込み可能なためオプション化"
-	echo "-l  --logfile : ログファイルのパスを指定 デフォ:[$LOG_FILE]"
-	echo "-h  --help : helpを出力"
-H" "$console_lines" # \e[%d;1H と \e[%dd は同じ意味"
+	printf "\e7\e[%d;1H" "$console_lines" # \e[%d;1H と \e[%dd は同じ意味"
 	printf "\e[M" # カーソルの行を削除 #printf "\e[K" #カーソル位置から後ろを削除 (前は1K) #printf "%*s\r" $COLUMNS
 
 	printf -vtrimed_mode_at_status "sub_files:%*d/%*d | sources:%*d/%*d | fail:%*d || mode:%s" 5 $excuting_source_count 5 $source_path_list_size 5 $excuting_source_root_count 5 $source_home_list_size 4 $fail_count $mode_at_status

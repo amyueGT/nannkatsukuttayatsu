@@ -3,7 +3,6 @@
 #BACKUP_SOURCE_ROOT=/home/backup
 BACKUP_SOURCE_specified=
 BACKUP_DEST_HOME=/home/backup/dest/home
-#BACKUP_DEST_HOME=/home/backup
 BACKUP_DEST_ROOT=${BACKUP_DEST_HOME}/backup_root
 
 
@@ -32,6 +31,19 @@ else
 
 fi
 
+test_init(){
+	BACKUP_SOURCE_ROOT=/home/test_tree
+	BACKUP_SOURCE_specified=
+	BACKUP_DEST_HOME=/home/pi/test_backup
+	BACKUP_DEST_ROOT=${BACKUP_DEST_HOME}/backup_root
+
+	if [[ $BACKUP_DEST_HOME == "/home/pi/test_backup" ]];then
+		rm -r $BACKUP_DEST_ROOT
+		mkdir --parent $BACKUP_DEST_ROOT
+	fi
+}
+
+#test_init
 
 TYPE_F=0
 TYPE_HF=1
@@ -48,6 +60,9 @@ function backup_202511_help(){
 	echo "-s  --simulation : ログだけを表示で作成されるパスの確認 デフォ設定"
 	echo "-e  --execute : 実際にバックアップをとる"
 	echo "-d  --detail : 詳細なログを出力 (ログを減らして速度アップ"
+	echo "    --append_date : ファイル末尾に追加する日付を以下から選択 デフォ:[ file ]"
+	echo "    						today : 今日の日付"
+	echo "    						file  : ファイルのctime(最終更新日時) --bind_dir系を指定しない場合に容量節約"
 	echo "    --whole_home : ${HOME}をすべてバックアップ @[${BACKUP_DEST_ROOT}/yyyyddmm/${HOME} ]"
 	echo "    --bind_dir : ディレクトリの場合内部を見ずに[dir_name_bkyyyyddmm]のようにまとめる"
 	echo "    --bind_hidden_dir : 隠しディレクトリの場合内部を見ずに[.hidden_dir_name_bkyyyyddmm]のようにまとめる"
@@ -64,6 +79,7 @@ function backup_202511_help(){
 	echo "-b --break_words[=word1,word2,..wordN] : ブレークするワード。カンマ区切り。関数break_point()指定時のみ" ##この行はどっか別のところへ
 	echo
 	echo "== 今後の課題 =="
+	echo "・ コンソール側でログ先頭でのカーソル移動がバグってて実行確認後にこのシェル地震から上数行のコンソール表示を上書きしてるバグ20251231"
 	echo "・ --bind_dir時等にtarを作成する処理を追加できたらやる。tarアーカイブを作成して全部そこに追加する形にする（？）20251128"
 	echo "・ find時ディレクトリのみとファイルのみを分けてリスト上では一つにしたほうが良いかも(?)２重ループがおかしい 20251203"
 	echo "・ 以前にアップしたバックアップ用のシェルも全然使ってないがそのバックアップファイルを別の場所に移行するシェルに続けて"
@@ -88,12 +104,26 @@ is_debug=false
 is_ignore=false
 is_break_point=false
 is_command_confirm=false
+is_date_today=false
 for arg in $@;do
 	if [[ $arg =~ ^(-h|--help) ]];then
 		backup_202511_help
 		exit
 	fi
-
+	if [[ $1 == "--append_date" ]];then
+		# 20251231追加
+		arg="${arg#*append_date}"
+		# arg="${arg#*a}"
+		arg="${arg#*=}"
+		if [[ $arg == today ]];then
+			is_date_today=true;
+			mode_at_status+="append_date:today "
+		#else [[ $arg == file ]];then
+			# ファイルのatimeをappendする
+			#is_date_today=false;
+			#mode_at_status+="append_date:file "
+		fi
+	fi
 	if [[ $arg =~ ^(-e|--execute) && ! "$@" =~ ^(-s|--simulation) ]];then
 		is_sim=false
 		set -- ${@//$arg/};
@@ -257,8 +287,8 @@ function backup_202511_init(){
 	begin_date=$(date)
 
 	dest_dir_root=$BACKUP_DEST_ROOT
-	append_text="bkup$(date +'%Y%m%d%H%M%S')"
-	append_text="_${append_text}";
+	#append_text="bkup$(date +'%Y%m%d%H%M%S')"
+	#append_text="_${append_text}";
 
 	tmp_IFS=$IFS
 	IFS=$'\n'
@@ -295,6 +325,22 @@ function backup_202511_init(){
 	#trap 'backup_202511_finally SIGTSTP;' SIGTSTP
 	#trap 'echo $BASHPID;backup_202511_finally SIGTSTP $BASHPID;kill -SIGCONT $BASHPID;' SIGTSTP
 	detail_logecho "init done"
+}
+
+function get_append_text(){
+	# 20251231追加
+    local target_file="$1"
+    local date_time=
+    if $is_date_today || (($is_type >= $TYPE_D));then
+    	# 今の日時
+        date_time=$(date +%Y%m%d%H%M%S)
+    else
+    	# ファイルの更新日時 atime
+    	date_time=$(date --reference="$target_file" +'%Y%m%d%H%M%S')
+	fi
+	printf "_bkup$date_time"
+	#append_text="bkup$date_time"
+	#append_text="_${append_text}";
 }
 
 CCTRL_SAVE=1
@@ -356,13 +402,14 @@ function backup_202511_finally(){
 		done && logecho ""
 		if [[ $source_path_list_size -gt 0 && -n ${EXCEPTION[@]} ]];then
 			logecho それ以外は多分全部実行できた
-		elif $is_sim;then
-			logecho "simulation モードだから実際のバックアップはまだやってないぞ"
 		else
 			logecho まだバックアップは何も実行してないぞ #successをカウントして件数表示
 		fi
 	else
 		logecho "たぶん全部実行できた"
+	fi
+	if $is_sim;then
+		logecho "simulation モードだから実際のバックアップはまだやってないぞ"
 	fi
 	logecho
 	logecho "mode was :$mode_at_status"
@@ -560,7 +607,7 @@ function backup_202511(){
 			fi
 			if [[ -n $hidden_dir ]];then
 				hidden_dir=${hidden_dir#/}
-				source_home_child=${source_home_child%${hidden_dir}*}${hidden_dir}
+				source_home_child="${source_home_child%${hidden_dir}*}${hidden_dir}"
 				if [[ $is_bind_hidden_dir && $source_path != /${source_home}/${source_home_child} ]];then
 					EXCEPTION+=("--bind_hidden_dirが指定されてるけどhidden_dir以下のファイルが指定されたためcontinue.指定されたファイル:$source_path")
 					detail_logecho "--bind_hidden_dirが指定されてるけどhidden_dir以下のファイルが指定されたためcontinue.指定されたファイル:$source_path"
@@ -573,31 +620,31 @@ function backup_202511(){
 			logecho "$(if [[ -n $hidden_dir ]];then echo "but in \"$hidden_dir\" so $file_type."; else echo "";fi)"
 
 			# 宛先パスの作成
-			source_path_dest=${source_path#/}
+			source_path_dest="${source_path#/}"
 			dest_path=
-			append_text=${append_text}
+			append_text="$(get_append_text "$source_path")" #関数側でis_typeを参照
 			if [[ $is_type -ge $TYPE_D ]];then
-				source_path_dirs=${source_path}
+				source_path_dirs="${source_path}"
 				if $is_bind_hidden_dir && ((is_type==TYPE_HD));then #[[ -n $hidden_dir ]];then 
-					source_path_dirs=${source_path%${hidden_dir}*}${hidden_dir}
-					dest_dir+=${source_path%${hidden_dir}*}${hidden_dir}
-					dest_dir+=${append_text}
+					source_path_dirs="${source_path%${hidden_dir}*}${hidden_dir}"
+					dest_dir+="${source_path%${hidden_dir}*}${hidden_dir}"
+					dest_dir+="${append_text}"
 					dest_path=
 				elif $is_bind_dir ;then
-					dest_dir+=${source_path}
-					dest_dir+=${append_text}
+					dest_dir+="${source_path}"
+					dest_dir+="${append_text}"
 					dest_path=
 				else
 					# オプション無しでディレクトリを指定した場合
-					dest_dir+=$source_path_dirs
-					dest_path=${dest_dir_root}${source_path}
+					dest_dir+="$source_path_dirs"
+					dest_path="${dest_dir_root}${source_path}"
 				fi
 			else
-				source_path_dirs=${source_path%/*}
-				source_path_tail=${source_path##*/}
-				dest_dir+=${source_path_dirs}
-				dest_path=${dest_dir_root} #$dest_dir
-				dest_path+=${source_path}${append_text}
+				source_path_dirs="${source_path%/*}"
+				source_path_tail="${source_path##*/}"
+				dest_dir+="${source_path_dirs}"
+				dest_path="${dest_dir_root}" #$dest_dir
+				dest_path+="${source_path}${append_text}"
 			fi
 			# コピーの実行
 			if ((is_type>=TYPE_D));then # || is_type==TYPE_HD));then
@@ -760,7 +807,8 @@ function print_data(){
 	if $is_debug;then
 		logecho -e "\r"
 		logecho -n "####################### print_data lineNo:${BASH_LINENO[0]} "
-		logecho -h <<-EOS
+		#logecho -h <<-EOS
+		logecho -h <<EOS
 			source_roots:$excuting_source_root_count/$source_home_list_size
 			targets     :$excuting_source_count/$source_path_list_size
 			fails       :$fail_count
@@ -827,7 +875,8 @@ COMMAND_CONFIRM_EXECUTE=0
 COMMAND_CONFIRM_CANCEL=1
 function command_confirm(){
 	print_info(){
-		logecho -h <<-EOS
+		#logecho -h <<-EOS
+		logecho -h <<EOS
 				e + enter :このコマンドを実行する $($is_sim && echo "(オプション[--execute]が指定されてないから実行したフリだけ)")
 				l + enter :対象ファイルを一覧する
 				c + enter :キャンセルして次のファイルへ
@@ -846,11 +895,12 @@ EOS
 			elif [[ $res == "l" ]];then
 				logecho "######################################### confirm print : list"
 				logecho "====== 指定されたパス一覧"
-				logecho -h <<-EOS
+				#logecho -h <<-EOS
+				logecho -h <<EOS
 					$(printf "%s\n" ${source_home_list[@]})
-					EOS
+EOS
 				logecho "====== バックアップ対象ファイル一覧"
-				logecho -h <<-EOS
+				logecho -h <<EOS
 					$(printf "%s\n" ${source_path_list[@]})
 EOS
 				logecho "######################################### confirm print : list end"

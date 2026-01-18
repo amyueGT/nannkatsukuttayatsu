@@ -1,0 +1,39 @@
+
+function bd(){
+	# clip_board
+	local clip_board="/tmp/${BASHPID}_clip";
+	local is_exec=false
+	function bd_clip(){
+		#clip
+		printf "%s" "$@" > $clip_board;
+	}
+	function bd_paste(){
+		#paste
+		if [[ -z $@ ]];then
+			printf "%s" "$(cat $clip_board)";
+		else
+			local paste_position="@p@"
+			if $is_exec;then
+				eval "$(printf '%s' "$@"|sed -E "s/${paste_position}/$(cat $clip_board)/")"
+			else
+				printf "%s" "$@"|sed -E "s/${paste_position}/$(cat $clip_board)/"
+			fi
+		fi
+	}
+
+	if [[ $1 == c ]];then
+		shift;
+		bd_clip "$@";
+	elif [[ $1 =~ ^p ]];then
+		if [[ $1 == pe ]];then
+			is_exec=true;
+		fi
+		shift;
+		bd_paste "$@";
+	else
+		echo bd c \"text\"でコピー 
+		echo bd p で貼り付け 
+		echo bd pe でテキストをeval実行する
+		echo 貼り付け時は貼り付けたいテキストに\"@p@\"を描いておくとその位置に貼り付け
+	fi
+}
